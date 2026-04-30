@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fruit Dots - Mobile Ready</title>
+    <style>
+        /* Prevent selection and scrolling on mobile */
+        * { -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; }
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: 'Segoe UI', sans-serif; position: fixed; width: 100%; height: 100%; }
+        canvas { display: block; }
+        
+        #ui { position: absolute; top: env(safe-area-inset-top, 20px); left: 20px; color: white; font-size: 20px; font-weight: bold; pointer-events: none; display: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); z-index: 5; }
+        #timer-display { margin-left: 15px; color: #ffeb3b; }
+        #high-score-ui { display: block; color: #44ff44; font-size: 14px; margin-top: 5px; }
+        
+        #menu {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        h1 { color: #fff; font-size: clamp(40px, 10vw, 60px); margin-bottom: 5px; }
+        #final-score { color: #fff; font-size: 20px; margin: 10px 0; }
+        #best-scores-summary { color: #aaa; margin-bottom: 20px; font-size: 14px; line-height: 1.6; }
+        
+        .mode-container { display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px; }
+        button {
+            padding: 15px;
+            font-size: 18px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+        }
+        .btn-unlimited { background: #4caf50; color: white; }
+        .btn-timed { background: #2196f3; color: white; }
+        small { display: block; font-weight: normal; font-size: 12px; opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1 id="title">FRUIT DOTS</h1>
+        <div id="final-score"></div>
+        <div id="best-scores-summary">
+            Best (Unlimited): <span id="best-unlimited">0</span><br>
+            Best (Timed): <span id="best-timed">0</span>
+        </div>
+        <div class="mode-container">
+            <button class="btn-unlimited" onclick="startGame('unlimited')">UNLIMITED<br><small>Survival</small></button>
+            <button class="btn-timed" onclick="startGame('timed')">TIMED MODE<br><small>1:59 Challenge</small></button>
+        </div>
+    </div>
+
+    <div id="ui">
+        SCORE: <span id="score">0</span> <span id="timer-display"></span>
+        <div id="high-score-ui">BEST: <span id="current-high">0</span></div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const timerElement = document.getElementById('timer-display');
+    const highScoreElement = document.getElementById('current-high');
+    const menu = document.getElementById('menu');
+    const ui = document.getElementById('ui');
+    const title = document.getElementById('title');
+    const finalScoreTxt = document.getElementById('final-score');
+    const bestUnlimitedTxt = document.getElementById('best-unlimited');
+    const bestTimedTxt = document.getElementById('best-timed');
+
+    let score = 0, items = [], trail = [], gameActive = false, isTouching = false;
+    let gameMode = '', timeLeft = 0, timerInterval;
+
+    function updateMenuHighScores() {
+        bestUnlimitedTxt.innerText = localStorage.getItem('highScore_unlimited') || 0;
+        bestTimedTxt.innerText = localStorage.getItem('highScore_timed') || 0;
+    }
+    updateMenuHighScores();
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function startGame(mode) {
+        score = 0; gameMode = mode; items = []; trail = []; gameActive = true;
+        scoreElement.innerText = score;
+        highScoreElement.innerText = localStorage.getItem('highScore_' + mode) || 0;
+        menu.style.display = 'none';
+        ui.style.display = 'block';
+
+        if (mode === 'timed') {
+            timeLeft = 119;
+            updateTimerUI();
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                updateTimerUI();
+                if (timeLeft <= 0) endGame("TIME'S UP!");
+            }, 1000);
+        } else {
+            timerElement.innerText = "";
+        }
+    }
+
+    function updateTimerUI() {
+        const mins = Math.floor(timeLeft / 60);
+        const secs = timeLeft % 60;
+        timerElement.innerText = `? ${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+
+    function endGame(reason) {
+        gameActive = false;
+        clearInterval(timerInterval);
+        const savedHigh = localStorage.getItem('highScore_' + gameMode) || 0;
+        if (score > savedHigh) localStorage.setItem('highScore_' + gameMode, score);
+        menu.style.display = 'flex';
+        ui.style.display = 'none';
+        title.innerText = score > savedHigh ? "NEW RECORD!" : reason;
+        finalScoreTxt.innerText = "Final Score: " + score;
+        updateMenuHighScores();
+    }
+
+    class GameObject {
+        constructor(isBomb = false) {
+            this.isBomb = isBomb;
+            this.radius = isBomb ? 22 : 30;
+            this.x = Math.random() * (canvas.width - 60) + 30;
+            this.y = canvas.height + 50;
+            this.gravity = 0.25;
+            this.vy = -Math.sqrt(2 * this.gravity * (canvas.height * 0.75)); 
+            this.vx = (Math.random() - 0.5) * (canvas.width * 0.01);
+            this.color = isBomb ? '#000000' : `hsl(${Math.random() * 360}, 70%, 50%)`;
+            this.sliced = false;
+        }
+        update() { this.vy += this.gravity; this.x += this.vx; this.y += this.vy; }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            if (this.isBomb) {
+                ctx.shadowBlur = 10; ctx.shadowColor = "red"; ctx.fill();
+                ctx.strokeStyle = "orange"; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(this.x, this.y - this.radius);
+                ctx.lineTo(this.x + 6, this.y - this.radius - 6); ctx.stroke();
+            } else { ctx.fill(); }
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    // --- Unified Input (Mobile + Desktop) ---
+    function handleInput(x, y) {
+        if (!gameActive) return;
+        trail.push({ x, y });
+        if (trail.length > 6) trail.shift();
+
+        items.forEach((item, index) => {
+            if (!item.sliced) {
+                let dist = Math.hypot(x - item.x, y - item.y);
+                if (dist < item.radius + 10) {
+                    item.sliced = true;
+                    if (item.isBomb) endGame("GAME OVER!");
+                    else { score += 1; scoreElement.innerText = score; }
+                    setTimeout(() => items.splice(index, 1), 10);
+                }
+            }
+        });
+    }
+
+    canvas.addEventListener('mousedown', () => isTouching = true);
+    canvas.addEventListener('mouseup', () => { isTouching = false; trail = []; });
+    canvas.addEventListener('mousemove', (e) => { if(isTouching) handleInput(e.clientX, e.clientY); });
+
+    canvas.addEventListener('touchstart', (e) => { isTouching = true; e.preventDefault(); }, {passive: false});
+    canvas.addEventListener('touchend', () => { isTouching = false; trail = []; });
+    canvas.addEventListener('touchmove', (e) => {
+        if(isTouching) {
+            const touch = e.touches[0];
+            handleInput(touch.clientX, touch.clientY);
+        }
+        e.preventDefault();
+    }, {passive: false});
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (gameActive) {
+            if (Math.random() < 0.03) items.push(new GameObject(Math.random() < 0.15));
+            if (trail.length > 1) {
+                ctx.beginPath(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 5;
+                ctx.lineCap = 'round'; ctx.moveTo(trail[0].x, trail[0].y);
+                trail.forEach(t => ctx.lineTo(t.x, t.y)); ctx.stroke();
+            }
+            items.forEach((item, index) => {
+                item.update(); item.draw();
+                if (item.y > canvas.height + 100) items.splice(index, 1);
+            });
+        }
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+</script>
+</body>
+</html>
